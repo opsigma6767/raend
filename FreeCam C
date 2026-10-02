@@ -1,0 +1,89 @@
+-- Configuration
+local TOGGLE_KEY = Enum.KeyCode.C
+local FLY_SPEED = 50
+local SHIFT_SPEED = 150 -- Speed when holding LeftShift
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- State Variables
+local freecamActive = false
+local cameraPos = Vector3.zero
+local cameraRot = Vector2.zero
+local cameraConnection = nil
+
+-- Inputs tracking
+local movements = {
+    W = false, A = false, S = false, D = false,
+    E = false, Q = false, LeftShift = false
+}
+
+-- Handle Inputs
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    
+    if input.KeyCode == TOGGLE_KEY then
+        freecamActive = not freecamActive
+        if freecamActive then
+            -- Enable Freecam
+            cameraPos = Camera.CFrame.Position
+            local look = Camera.CFrame.LookVector
+            cameraRot = Vector2.new(math.atan2(-look.X, -look.Z), math.asin(look.Y))
+            Camera.CameraType = Enum.CameraType.Scriptable
+            
+            -- Lock mouse behavior for looking around
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+            
+            -- Loop update
+            cameraConnection = RunService.RenderStepped:Connect(function(dt)
+                -- Mouse look
+                local delta = UserInputService:GetMouseDelta()
+                cameraRot = cameraRot - Vector2.new(delta.X * 0.003, delta.Y * 0.003)
+                cameraRot = Vector2.new(cameraRot.X, math.clamp(cameraRot.Y, -math.pi/2 + 0.01, math.pi/2 - 0.01))
+                
+                local cf = CFrame.new(cameraPos) * CFrame.Angles(0, cameraRot.X, 0) * CFrame.Angles(cameraRot.Y, 0, 0)
+                
+                -- Movement Vectors
+                local moveDir = Vector3.zero
+                if movements.W then moveDir = moveDir + cf.LookVector end
+                if movements.S then moveDir = moveDir - cf.LookVector end
+                if movements.A then moveDir = moveDir - cf.RightVector end
+                if movements.D then moveDir = moveDir + cf.RightVector end
+                if movements.E then moveDir = moveDir + Vector3.new(0, 1, 0) end
+                if movements.Q then moveDir = moveDir - Vector3.new(0, 1, 0) end
+                
+                -- Apply Speed
+                local currentSpeed = movements.LeftShift and SHIFT_SPEED or FLY_SPEED
+                cameraPos = cameraPos + (moveDir * currentSpeed * dt)
+                
+                -- Update Camera
+                Camera.CFrame = CFrame.new(cameraPos) * CFrame.Angles(0, cameraRot.X, 0) * CFrame.Angles(cameraRot.Y, 0, 0)
+                UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+            end)
+        else
+            -- Disable Freecam
+            if cameraConnection then cameraConnection:Disconnect() end
+            Camera.CameraType = Enum.CameraType.Custom
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        end
+    end
+    
+    -- Track movement keys
+    local keyName = input.KeyCode.Name
+    if movements[keyName] ~= nil then
+        movements[keyName] = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    local keyName = input.KeyCode.Name
+    if movements[keyName] ~= nil then
+        movements[keyName] = false
+    end
+end)
