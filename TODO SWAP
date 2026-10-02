@@ -1,0 +1,175 @@
+-- LocalScript JJS Swap & Target Selector (Auto-Stop Upon Executing R)
+local Players = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+-- State Variables
+local selectedTarget = nil
+local activeKeybind = Enum.KeyCode.C -- Default keybind C
+local isListeningForKey = false
+local isSwapping = false
+
+-- UI Setup
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "JJS_TargetGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 220, 0, 320)
+mainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 30)
+titleLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+titleLabel.Text = "JJS Swap (One-Shot R)"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 16
+titleLabel.Parent = mainFrame
+
+local keybindBtn = Instance.new("TextButton")
+keybindBtn.Size = UDim2.new(0.9, 0, 0, 35)
+keybindBtn.Position = UDim2.new(0.05, 0, 0.12, 0)
+keybindBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+keybindBtn.Text = "Keybind: [ C ]"
+keybindBtn.TextColor3 = Color3.fromRGB(255, 255, 0)
+keybindBtn.Font = Enum.Font.SourceSansBold
+keybindBtn.TextSize = 15
+keybindBtn.Parent = mainFrame
+
+local targetStatusLabel = Instance.new("TextLabel")
+targetStatusLabel.Size = UDim2.new(0.9, 0, 0, 25)
+targetStatusLabel.Position = UDim2.new(0.05, 0, 0.25, 0)
+targetStatusLabel.BackgroundTransparency = 1
+targetStatusLabel.Text = "Target: None"
+targetStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+targetStatusLabel.Font = Enum.Font.SourceSans
+targetStatusLabel.TextSize = 14
+targetStatusLabel.Parent = mainFrame
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(0.9, 0, 0.6, 0)
+scrollFrame.Position = UDim2.new(0.05, 0, 0.35, 0)
+scrollFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollFrame.Parent = mainFrame
+
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.Parent = scrollFrame
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+uiListLayout.Padding = UDim.new(0, 3)
+
+-- Fungsi tekan tombol R secara cepat
+local function fastPressR()
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+    task.wait(0.01)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+end
+
+-- Update Daftar Player Real-Time
+local function updatePlayerList()
+    for _, child in ipairs(scrollFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+
+    local count = 0
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            count = count + 1
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, -5, 0, 25)
+            btn.BackgroundColor3 = (selectedTarget == plr) and Color3.fromRGB(0, 150, 75) or Color3.fromRGB(35, 35, 35)
+            btn.Text = plr.DisplayName .. " (@" .. plr.Name .. ")"
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.Font = Enum.Font.SourceSans
+            btn.TextSize = 13
+            btn.Parent = scrollFrame
+
+            btn.MouseButton1Click:Connect(function()
+                selectedTarget = plr
+                targetStatusLabel.Text = "Target: " .. plr.DisplayName
+                updatePlayerList()
+            end)
+        end
+    end
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, count * 28)
+end
+
+-- Event Real-Time Join/Leave
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(function(plr)
+    if selectedTarget == plr then
+        selectedTarget = nil
+        targetStatusLabel.Text = "Target: None"
+    end
+    updatePlayerList()
+end)
+
+-- Ganti Keybind
+keybindBtn.MouseButton1Click:Connect(function()
+    isListeningForKey = true
+    keybindBtn.Text = "Press Any Key..."
+    keybindBtn.BackgroundColor3 = Color3.fromRGB(180, 100, 0)
+end)
+
+-- Deteksi Keybind
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if isListeningForKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            activeKeybind = input.KeyCode
+            keybindBtn.Text = "Keybind: [ " .. input.KeyCode.Name .. " ]"
+            keybindBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            isListeningForKey = false
+        end
+    elseif input.KeyCode == activeKeybind then
+        if selectedTarget then
+            isSwapping = true
+            targetStatusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+        end
+    end
+end)
+
+-- Loop Utama Teleport & Auto-Stop Setelah Execute
+task.spawn(function()
+    while true do
+        if isSwapping and selectedTarget and selectedTarget.Character then
+            Character = LocalPlayer.Character
+            local myRoot = Character and Character:FindFirstChild("HumanoidRootPart")
+            local targetPart = selectedTarget.Character:FindFirstChild("HumanoidRootPart") or selectedTarget.Character:FindFirstChild("Torso")
+            local targetHum = selectedTarget.Character:FindFirstChildOfClass("Humanoid")
+
+            if myRoot and targetPart and targetHum and targetHum.Health > 0 then
+                -- 1. Teleport ke target
+                myRoot.CFrame = targetPart.CFrame * CFrame.new(0, 0, 1.5)
+                
+                -- 2. Spam R (3 kali instan)
+                for _ = 1, 3 do
+                    fastPressR()
+                end
+
+                -- 3. Langsung matikan status swap (Auto Stop)
+                isSwapping = false
+                targetStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+            else
+                isSwapping = false
+                targetStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+            end
+        end
+        task.wait(0.01)
+    end
+end)
+
+-- Inisialisasi awal
+updatePlayerList()
