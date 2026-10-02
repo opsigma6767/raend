@@ -1,0 +1,365 @@
+-- LocalScript JJS Sight Lock & Accel Assistant (Updated Threshold: 70 Studs)
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+-- State Variables
+local hoveredPlayer = nil         -- Player yang sedang dilihat kamera
+local lockedPlayer = nil          -- Player yang dikunci via Keybind
+local autoLockSkillEnabled = true
+local totalStudsTraveled = 0
+local lastPosition = nil
+local lastSkill3Time = 0
+
+local lockTargetKeybind = Enum.KeyCode.Q -- Keybind Lock/Unlock Target (Q)
+local resetKeybind = Enum.KeyCode.H     -- Keybind Reset Counter Stud (H)
+
+local isListeningForLockKey = false
+local isListeningForResetKey = false
+
+-- Config Jarak & Durasi
+local MIN_ACCEL_DISTANCE = 70 -- Ambang batas minimal akselerasi (70-75 studs)
+local ACCEL_DURATION = 0.75   -- Durasi akselerasi smooth (detik)
+
+-- UI Setup
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "JJS_SightLockGUI_v2"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 240, 0, 260)
+mainFrame.Position = UDim2.new(0.02, 0, 0.35, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 30)
+titleLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+titleLabel.Text = "JJS Sight Lock (>70s Accel)"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 15
+titleLabel.Parent = mainFrame
+
+local toggleSkillBtn = Instance.new("TextButton")
+toggleSkillBtn.Size = UDim2.new(0.9, 0, 0, 28)
+toggleSkillBtn.Position = UDim2.new(0.05, 0, 0.14, 0)
+toggleSkillBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 75)
+toggleSkillBtn.Text = "3 + R Accel: ON"
+toggleSkillBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleSkillBtn.Font = Enum.Font.SourceSansBold
+toggleSkillBtn.TextSize = 13
+toggleSkillBtn.Parent = mainFrame
+
+local studLabel = Instance.new("TextLabel")
+studLabel.Size = UDim2.new(0.9, 0, 0, 20)
+studLabel.Position = UDim2.new(0.05, 0, 0.27, 0)
+studLabel.BackgroundTransparency = 1
+studLabel.Text = "Traveled: 0 Studs"
+studLabel.TextColor3 = Color3.fromRGB(0, 220, 255)
+studLabel.Font = Enum.Font.SourceSans
+studLabel.TextSize = 13
+studLabel.Parent = mainFrame
+
+local targetStatusLabel = Instance.new("TextLabel")
+targetStatusLabel.Size = UDim2.new(0.9, 0, 0, 22)
+targetStatusLabel.Position = UDim2.new(0.05, 0, 0.36, 0)
+targetStatusLabel.BackgroundTransparency = 1
+targetStatusLabel.Text = "Status: Look at target..."
+targetStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+targetStatusLabel.Font = Enum.Font.SourceSansBold
+targetStatusLabel.TextSize = 13
+targetStatusLabel.Parent = mainFrame
+
+local setLockKeyBtn = Instance.new("TextButton")
+setLockKeyBtn.Size = UDim2.new(0.9, 0, 0, 28)
+setLockKeyBtn.Position = UDim2.new(0.05, 0, 0.48, 0)
+setLockKeyBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+setLockKeyBtn.Text = "Lock Keybind: [ Q ]"
+setLockKeyBtn.TextColor3 = Color3.fromRGB(0, 255, 200)
+setLockKeyBtn.Font = Enum.Font.SourceSansBold
+setLockKeyBtn.TextSize = 13
+setLockKeyBtn.Parent = mainFrame
+
+local setResetKeyBtn = Instance.new("TextButton")
+setResetKeyBtn.Size = UDim2.new(0.9, 0, 0, 28)
+setResetKeyBtn.Position = UDim2.new(0.05, 0, 0.61, 0)
+setResetKeyBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+setResetKeyBtn.Text = "Reset Key: [ H ]"
+setResetKeyBtn.TextColor3 = Color3.fromRGB(255, 255, 0)
+setResetKeyBtn.Font = Enum.Font.SourceSansBold
+setResetKeyBtn.TextSize = 13
+setResetKeyBtn.Parent = mainFrame
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(0.9, 0, 0.22, 0)
+scrollFrame.Position = UDim2.new(0.05, 0, 0.74, 0)
+scrollFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollFrame.Parent = mainFrame
+
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.Parent = scrollFrame
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+uiListLayout.Padding = UDim.new(0, 3)
+
+-- Line Visual (Beam) & Highlight Box
+local beamAttachment0 = Instance.new("Attachment")
+local beamAttachment1 = Instance.new("Attachment")
+local targetBeam = Instance.new("Beam")
+
+targetBeam.Texture = "rbxassetid://446111271"
+targetBeam.TextureSpeed = 2
+targetBeam.Width0 = 0.2
+targetBeam.Width1 = 0.2
+targetBeam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 0))
+targetBeam.FaceCamera = true
+targetBeam.Parent = Workspace
+
+local targetHighlight = Instance.new("Highlight")
+targetHighlight.FillColor = Color3.fromRGB(255, 255, 0)
+targetHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+targetHighlight.FillTransparency = 0.6
+targetHighlight.OutlineTransparency = 0
+targetHighlight.Enabled = false
+targetHighlight.Parent = Workspace
+
+-- System Deteksi Player yang Dilihat Kamera (Raycast & Camera Direction)
+local function getPlayerInCameraSight()
+    local bestTarget = nil
+    local maxDot = 0.85 -- Batas toleransi sudut pandang (Makin mendekati 1, makin akurat di tengah layar)
+
+    local camCFrame = Camera.CFrame
+    local camLook = camCFrame.LookVector
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local tRoot = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character:FindFirstChild("Torso")
+            local tHum = plr.Character:FindFirstChildOfClass("Humanoid")
+
+            if tRoot and tHum and tHum.Health > 0 then
+                local dirToTarget = (tRoot.Position - camCFrame.Position).Unit
+                local dotProduct = camLook:Dot(dirToTarget)
+
+                if dotProduct > maxDot then
+                    maxDot = dotProduct
+                    bestTarget = plr
+                end
+            end
+        end
+    end
+
+    return bestTarget
+end
+
+-- Update Realtime Player List GUI
+local function updatePlayerList()
+    for _, child in ipairs(scrollFrame:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+
+    local count = 0
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            count = count + 1
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, -5, 0, 22)
+            btn.BackgroundColor3 = (lockedPlayer == plr) and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(35, 35, 35)
+            btn.Text = plr.DisplayName .. " (@" .. plr.Name .. ")"
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.Font = Enum.Font.SourceSans
+            btn.TextSize = 11
+            btn.Parent = scrollFrame
+
+            btn.MouseButton1Click:Connect(function()
+                if lockedPlayer == plr then
+                    lockedPlayer = nil
+                else
+                    lockedPlayer = plr
+                end
+                updatePlayerList()
+            end)
+        end
+    end
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, count * 25)
+end
+
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(function(plr)
+    if lockedPlayer == plr then lockedPlayer = nil end
+    updatePlayerList()
+end)
+
+-- Toggle Skill 3 + R Accel Feature
+toggleSkillBtn.MouseButton1Click:Connect(function()
+    autoLockSkillEnabled = not autoLockSkillEnabled
+    if autoLockSkillEnabled then
+        toggleSkillBtn.Text = "3 + R Accel: ON"
+        toggleSkillBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 75)
+    else
+        toggleSkillBtn.Text = "3 + R Accel: OFF"
+        toggleSkillBtn.BackgroundColor3 = Color3.fromRGB(150, 35, 35)
+    end
+end)
+
+-- Function Akselerasi Mulus ke Target (Tweening)
+local function accelerateToTarget(targetPart, duration)
+    Character = LocalPlayer.Character
+    local myRoot = Character and Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot or not targetPart then return end
+
+    local targetCFrame = targetPart.CFrame * CFrame.new(0, 0, 1.5)
+    local tweenInfo = TweenInfo.new(
+        duration, 
+        Enum.EasingStyle.Quad, 
+        Enum.EasingDirection.Out
+    )
+    
+    local tween = TweenService:Create(myRoot, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+end
+
+-- Render Loop: Sight Tracking & Visual Highlight Line
+RunService.RenderStepped:Connect(function(dt)
+    Character = LocalPlayer.Character
+    if Character and Character:FindFirstChild("HumanoidRootPart") then
+        local currentPos = Character.HumanoidRootPart.Position
+        if lastPosition then
+            local dist = (currentPos - lastPosition).Magnitude
+            if dist > 0.05 and dist < 250 then
+                totalStudsTraveled = totalStudsTraveled + dist
+                studLabel.Text = string.format("Traveled: %.1f Studs", totalStudsTraveled)
+            end
+        end
+        lastPosition = currentPos
+    end
+
+    -- Update Player yang sedang dilihat kamera jika belum di-Lock
+    hoveredPlayer = getPlayerInCameraSight()
+
+    local activeTarget = lockedPlayer or hoveredPlayer
+
+    if activeTarget and activeTarget.Character then
+        local myRoot = Character and Character:FindFirstChild("HumanoidRootPart")
+        local tRoot = activeTarget.Character:FindFirstChild("HumanoidRootPart") or activeTarget.Character:FindFirstChild("Torso")
+
+        if myRoot and tRoot then
+            beamAttachment0.Parent = myRoot
+            beamAttachment1.Parent = tRoot
+            targetBeam.Attachment0 = beamAttachment0
+            targetBeam.Attachment1 = beamAttachment1
+            targetBeam.Enabled = true
+
+            targetHighlight.Adornee = activeTarget.Character
+            targetHighlight.Enabled = true
+
+            local dist = math.floor((myRoot.Position - tRoot.Position).Magnitude)
+
+            if lockedPlayer then
+                -- Merah = Target dikunci (Lock)
+                targetHighlight.FillColor = Color3.fromRGB(255, 0, 0)
+                targetBeam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 0))
+                targetStatusLabel.Text = "LOCKED: " .. activeTarget.DisplayName .. " (" .. dist .. "s)"
+                targetStatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            else
+                -- Kuning = Target sedang dilihat (Hover)
+                targetHighlight.FillColor = Color3.fromRGB(255, 255, 0)
+                targetBeam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 0))
+                targetStatusLabel.Text = "Aiming: " .. activeTarget.DisplayName .. " (" .. dist .. "s)"
+                targetStatusLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+            end
+        else
+            targetBeam.Enabled = false
+            targetHighlight.Enabled = false
+        end
+    else
+        targetBeam.Enabled = false
+        targetHighlight.Enabled = false
+        targetStatusLabel.Text = "Status: Look at target..."
+        targetStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    end
+end)
+
+-- Setting Keybind Buttons
+setLockKeyBtn.MouseButton1Click:Connect(function()
+    isListeningForLockKey = true
+    setLockKeyBtn.Text = "Press Any Key..."
+    setLockKeyBtn.BackgroundColor3 = Color3.fromRGB(180, 100, 0)
+end)
+
+setResetKeyBtn.MouseButton1Click:Connect(function()
+    isListeningForResetKey = true
+    setResetKeyBtn.Text = "Press Any Key..."
+    setResetKeyBtn.BackgroundColor3 = Color3.fromRGB(180, 100, 0)
+end)
+
+-- Listener Input Keybind Manual
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if isListeningForLockKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            lockTargetKeybind = input.KeyCode
+            setLockKeyBtn.Text = "Lock Keybind: [ " .. input.KeyCode.Name .. " ]"
+            setLockKeyBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            isListeningForLockKey = false
+        end
+    elseif isListeningForResetKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            resetKeybind = input.KeyCode
+            setResetKeyBtn.Text = "Reset Key: [ " .. input.KeyCode.Name .. " ]"
+            setResetKeyBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            isListeningForResetKey = false
+        end
+    elseif input.KeyCode == lockTargetKeybind then
+        -- Toggle Lock/Unlock Target
+        if lockedPlayer then
+            lockedPlayer = nil -- UNLOCK Target
+        else
+            if hoveredPlayer then
+                lockedPlayer = hoveredPlayer -- LOCK Player yang sedang dilihat
+            end
+        end
+        updatePlayerList()
+
+    elseif input.KeyCode == Enum.KeyCode.Three then
+        -- Catat waktu tekan Skill 3
+        lastSkill3Time = tick()
+
+    elseif input.KeyCode == Enum.KeyCode.R then
+        -- Jika tekan R dalam jeda 2 detik setelah Skill 3
+        if autoLockSkillEnabled and (tick() - lastSkill3Time <= 2.0) then
+            local targetToAccel = lockedPlayer or hoveredPlayer
+            if targetToAccel and targetToAccel.Character then
+                local myRoot = Character and Character:FindFirstChild("HumanoidRootPart")
+                local tRoot = targetToAccel.Character:FindFirstChild("HumanoidRootPart") or targetToAccel.Character:FindFirstChild("Torso")
+
+                if myRoot and tRoot then
+                    local distance = (myRoot.Position - tRoot.Position).Magnitude
+                    
+                    -- Jika jarak ke target yang dikunci/dilihat lebih dari MIN_ACCEL_DISTANCE (70 Studs)
+                    if distance >= MIN_ACCEL_DISTANCE then
+                        accelerateToTarget(tRoot, ACCEL_DURATION)
+                    end
+                end
+            end
+        end
+
+    elseif input.KeyCode == resetKeybind then
+        -- Reset Counter Studs
+        totalStudsTraveled = 0
+        studLabel.Text = "Traveled: 0 Studs"
+    end
+end)
+
+-- Inisialisasi awal
+updatePlayerList()
