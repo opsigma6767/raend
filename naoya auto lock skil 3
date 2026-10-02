@@ -1,0 +1,259 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+local camera = workspace.CurrentCamera
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+
+-- =====================================
+-- PENGATURAN DURASI & JARAK
+-- =====================================
+local DURASI_LOCK_SKILL = 2 
+local MAKSIMAL_JARAK_DASH = 350 -- Batas maksimal luncuran & deteksi
+local KECEPATAN_MELUNCUR = 200 -- Semakin tinggi semakin cepat meluncur
+
+local lockedTarget = nil
+local safeFolder = (gethui and gethui()) or game:GetService("CoreGui")
+
+-- Visual Box & Marker
+local targetBox = Instance.new("SelectionBox")
+targetBox.Name = "LockOnBox"
+targetBox.Color3 = Color3.fromRGB(255, 0, 0)
+targetBox.LineThickness = 0.05
+targetBox.SurfaceColor3 = Color3.fromRGB(255, 0, 0)
+targetBox.SurfaceTransparency = 0.8
+targetBox.Transparency = 0
+
+local targetMarker = Instance.new("BillboardGui")
+targetMarker.Name = "TargetMarker"
+targetMarker.Size = UDim2.new(0, 100, 0, 50)
+targetMarker.StudsOffset = Vector3.new(0, 3, 0) 
+targetMarker.AlwaysOnTop = true
+
+local markerText = Instance.new("TextLabel")
+markerText.Parent = targetMarker
+markerText.BackgroundTransparency = 1
+markerText.Size = UDim2.new(1, 0, 1, 0)
+markerText.Text = "▼ TARGET ▼"
+markerText.TextColor3 = Color3.fromRGB(255, 0, 0)
+markerText.TextScaled = true
+markerText.Font = Enum.Font.GothamBold
+markerText.TextStrokeTransparency = 0
+
+pcall(function()
+    targetBox.Parent = safeFolder
+    targetMarker.Parent = safeFolder
+end)
+
+local IS_ACTIVE = false
+local isCameraLocked = false
+local cameraConnection = nil
+
+local function applyVisuals(targetChar)
+    targetBox.Adornee = targetChar
+    targetMarker.Adornee = targetChar:FindFirstChild("Head") or targetChar.PrimaryPart
+end
+
+local function removeVisuals()
+    targetBox.Adornee = nil
+    targetMarker.Adornee = nil
+end
+
+local function getCharacterFromPart(part)
+    if not part then return nil end
+    local current = part
+    while current and current ~= workspace do
+        if current:FindFirstChild("Humanoid") then
+            return current
+        end
+        current = current.Parent
+    end
+    return nil
+end
+
+local function getClosestTarget()
+    local closestDistance = math.huge
+    local bestTarget = nil
+
+    for _, v in pairs(workspace:GetChildren()) do
+        if v:IsA("Model") and v ~= character and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
+            if v.Humanoid.Health > 0 then
+                local targetHRP = v.HumanoidRootPart
+                local dist = (hrp.Position - targetHRP.Position).Magnitude
+                
+                -- Batas deteksi disamakan dengan maksimal dash (50 stud)
+                if dist <= MAKSIMAL_JARAK_DASH and dist < closestDistance then
+                    closestDistance = dist
+                    bestTarget = v
+                end
+            end
+        end
+    end
+    return bestTarget
+end
+
+-- =====================================
+-- 1. MANUAL LOCK VISUAL SAJA (TOMBOL T)
+-- =====================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.T then
+        local targetPart = mouse.Target
+        local targetChar = getCharacterFromPart(targetPart)
+        
+        if targetChar and targetChar ~= character then
+            lockedTarget = targetChar
+            applyVisuals(targetChar)
+            print("[SISTEM] Target Ditandai: " .. targetChar.Name)
+        else
+            lockedTarget = nil
+            removeVisuals()
+            print("[SISTEM] Tanda Dilepas")
+        end
+    end
+end)
+
+-- =====================================
+-- 2. FUNGSI CAMERA LOCK KHUSUS
+-- =====================================
+local function activateCameraLock(targetHRP)
+    if cameraConnection then 
+        cameraConnection:Disconnect() 
+    end
+    
+    isCameraLocked = true
+    
+    cameraConnection = RunService.RenderStepped:Connect(function()
+        if not isCameraLocked or not targetHRP.Parent or not lockedTarget then
+            if cameraConnection then cameraConnection:Disconnect() end
+            return
+        end
+        local camPos = camera.CFrame.Position
+        local newCamCFrame = CFrame.lookAt(camPos, targetHRP.Position)
+        camera.CFrame = camera.CFrame:Lerp(newCamCFrame, 0.25)
+    end)
+    
+    task.delay(DURASI_LOCK_SKILL, function()
+        isCameraLocked = false
+    end)
+end
+
+-- =====================================
+-- 3. FUNGSI TP HOMING (PHYSICS SMOOTH)
+-- =====================================
+local function startHomingTP(targetHRP)
+    if not targetHRP then return end
+    if IS_ACTIVE then return end
+    
+    local startPos = hrp.Position
+    local distance = (startPos - targetHRP.Position).Magnitude
+    
+    -- JIKA JARAK LEBIH DARI 50 STUD, JANGAN DASH
+    if distance > MAKSIMAL_JARAK_DASH then
+        print("[SISTEM] Target melebihi 50 stud. Hanya mengunci kamera.")
+        return
+    end
+    
+    IS_ACTIVE = true
+    
+    -- Memakai BodyVelocity agar luncuran direplikasi dengan mulus ke server
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(100000, 100000, 100000)
+    bv.Parent = hrp
+    
+    -- Memakai BodyGyro agar badan otomatis menghadap musuh saat meluncur
+    local bg = Instance.new("BodyGyro")
+    bg.MaxTorque = Vector3.new(100000, 100000, 100000)
+    bg.D = 100
+    bg.Parent = hrp
+    
+    local connection
+    
+    connection = RunService.Heartbeat:Connect(function()
+        if not IS_ACTIVE or not targetHRP.Parent or not lockedTarget then
+            IS_ACTIVE = false
+            if bv then bv:Destroy() end
+            if bg then bg:Destroy() end
+            if connection then connection:Disconnect() end
+            return
+        end
+        
+        local currentDist = (hrp.Position - targetHRP.Position).Magnitude
+        
+        -- Berhenti jika sudah di depan muka musuh (Jarak < 3 stud)
+        if currentDist <= 3 then
+            IS_ACTIVE = false
+            if bv then bv:Destroy() end
+            if bg then bg:Destroy() end
+            if connection then connection:Disconnect() end
+            
+            -- Rem paksa agar tidak tembus badan musuh
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            return
+        end
+        
+        -- Arahkan dorongan dan badan ke musuh
+        local direction = (targetHRP.Position - hrp.Position).Unit
+        bv.Velocity = direction * KECEPATAN_MELUNCUR
+        bg.CFrame = CFrame.lookAt(hrp.Position, targetHRP.Position)
+    end)
+    
+    -- Safety Timeout (Maksimal 1 detik meluncur, lalu matikan paksa agar tidak nyangkut)
+    task.delay(1, function()
+        if IS_ACTIVE then
+            IS_ACTIVE = false
+            if bv then bv:Destroy() end
+            if bg then bg:Destroy() end
+            if connection then connection:Disconnect() end
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end
+    end)
+end
+
+-- =====================================
+-- 4. EKSEKUSI SKILL (TOMBOL 3)
+-- =====================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.Three then
+        
+        local targetToLock = nil
+        local isAutoTarget = false
+        
+        if lockedTarget then
+            targetToLock = lockedTarget
+        else
+            targetToLock = getClosestTarget()
+            isAutoTarget = true
+        end
+        
+        if targetToLock then
+            local targetHRP = targetToLock:FindFirstChild("HumanoidRootPart")
+            if targetHRP then
+                lockedTarget = targetToLock
+                applyVisuals(targetToLock)
+                
+                -- Mulai Meluncur (Hanya jika <= 50 stud)
+                startHomingTP(targetHRP)
+                
+                -- Mulai Lock Kamera
+                activateCameraLock(targetHRP)
+                
+                if isAutoTarget then
+                    task.delay(DURASI_LOCK_SKILL, function()
+                        if lockedTarget == targetToLock then
+                            lockedTarget = nil
+                            removeVisuals()
+                            print("[SISTEM] Auto-Target Selesai.")
+                        end
+                    end)
+                end
+            end
+        else
+            print("[SISTEM] Tidak ada musuh dalam jangkauan 50 stud.")
+        end
+    end
+end)
