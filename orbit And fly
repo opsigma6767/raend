@@ -1,0 +1,304 @@
+-- Roblox LocalScript (Orbit & Fly Hub - Clean Modern Redesign)
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- GUI Root
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "OrbitFlyHubModern"
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
+-- Main Window Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 310, 0, 480)
+MainFrame.Position = UDim2.new(0.05, 0, 0.15, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local FrameCorner = Instance.new("UICorner", MainFrame)
+FrameCorner.CornerRadius = UDim.new(0, 10)
+
+local FrameStroke = Instance.new("UIStroke", MainFrame)
+FrameStroke.Color = Color3.fromRGB(45, 45, 55)
+FrameStroke.Thickness = 1
+
+-- Header Bar
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 40)
+Header.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -20, 1, 0)
+Title.Position = UDim2.new(0, 12, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "ORBIT & FLY HUB"
+Title.TextColor3 = Color3.fromRGB(240, 240, 245)
+Title.TextSize = 14
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
+
+-- Scroll Canvas
+local Container = Instance.new("ScrollingFrame")
+Container.Size = UDim2.new(1, -20, 1, -50)
+Container.Position = UDim2.new(0, 10, 0, 45)
+Container.BackgroundTransparency = 1
+Container.ScrollBarThickness = 3
+Container.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 100)
+Container.CanvasSize = UDim2.new(0, 0, 0, 560)
+Container.Parent = MainFrame
+
+local UIList = Instance.new("UIListLayout")
+UIList.Padding = UDim.new(0, 8)
+UIList.SortOrder = Enum.SortOrder.LayoutOrder
+UIList.Parent = Container
+
+-- Variables
+local targetPlayer = nil
+local orbitEnabled = false
+local orbitSpeed = 20
+local orbitDistance = 8
+local orbitAngle = 0
+local orbitKeybind = Enum.KeyCode.R
+
+local flyEnabled = false
+local flySpeed = 50
+local flyKeybind = Enum.KeyCode.F
+local listeningKey = nil
+
+-- UI Helper Component Generators
+local function createSectionTitle(text)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, 20)
+    label.BackgroundTransparency = 1
+    label.Text = string.upper(text)
+    label.TextColor3 = Color3.fromRGB(110, 115, 135)
+    label.TextSize = 10
+    label.Font = Enum.Font.GothamBold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = Container
+end
+
+local function createButton(text, bgCol)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.BackgroundColor3 = bgCol or Color3.fromRGB(30, 30, 38)
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(230, 230, 240)
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 12
+    btn.AutoButtonColor = true
+    btn.Parent = Container
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    return btn
+end
+
+local function createInput(placeholder)
+    local input = Instance.new("TextBox")
+    input.Size = UDim2.new(1, 0, 0, 32)
+    input.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
+    input.Text = placeholder
+    input.TextColor3 = Color3.fromRGB(200, 200, 215)
+    input.Font = Enum.Font.Gotham
+    input.TextSize = 12
+    input.Parent = Container
+    
+    local stroke = Instance.new("UIStroke", input)
+    stroke.Color = Color3.fromRGB(40, 40, 50)
+    stroke.Thickness = 1
+    
+    Instance.new("UICorner", input).CornerRadius = UDim.new(0, 6)
+    return input
+end
+
+-- ================= BUILD UI ELEMENTS =================
+
+-- SECTION: TARGET SELECTOR
+createSectionTitle("Target Selector")
+
+local PlayerDrop = createButton("Select Player: [None]", Color3.fromRGB(35, 35, 45))
+local DropFrame = Instance.new("Frame")
+DropFrame.Size = UDim2.new(1, 0, 0, 100)
+DropFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+DropFrame.Visible = false
+DropFrame.Parent = Container
+Instance.new("UICorner", DropFrame).CornerRadius = UDim.new(0, 6)
+
+local ScrollDrop = Instance.new("ScrollingFrame", DropFrame)
+ScrollDrop.Size = UDim2.new(1, -6, 1, -6)
+ScrollDrop.Position = UDim2.new(0, 3, 0, 3)
+ScrollDrop.BackgroundTransparency = 1
+ScrollDrop.ScrollBarThickness = 2
+local DropLayout = Instance.new("UIListLayout", ScrollDrop)
+DropLayout.Padding = UDim.new(0, 4)
+
+local function updatePlayerList()
+    for _, child in pairs(ScrollDrop:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local pBtn = Instance.new("TextButton")
+            pBtn.Size = UDim2.new(1, 0, 0, 24)
+            pBtn.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
+            pBtn.Text = p.DisplayName .. " (@" .. p.Name .. ")"
+            pBtn.TextColor3 = Color3.fromRGB(210, 210, 225)
+            pBtn.Font = Enum.Font.Gotham
+            pBtn.TextSize = 11
+            pBtn.Parent = ScrollDrop
+            Instance.new("UICorner", pBtn).CornerRadius = UDim.new(0, 4)
+            
+            pBtn.MouseButton1Click:Connect(function()
+                targetPlayer = p
+                PlayerDrop.Text = "Target: " .. p.DisplayName
+                DropFrame.Visible = false
+            end)
+        end
+    end
+    ScrollDrop.CanvasSize = UDim2.new(0, 0, 0, DropLayout.AbsoluteContentSize.Y)
+end
+
+PlayerDrop.MouseButton1Click:Connect(function()
+    DropFrame.Visible = not DropFrame.Visible
+    if DropFrame.Visible then updatePlayerList() end
+end)
+
+-- SECTION: ORBIT CONTROLS
+createSectionTitle("Orbit Settings")
+
+local OrbitToggleBtn = createButton("Orbit System: OFF", Color3.fromRGB(140, 45, 45))
+local OrbitKeybindBtn = createButton("Keybind: [R]")
+local OrbitSpeedInput = createInput("Orbit Speed: 20")
+local OrbitDistanceInput = createInput("Orbit Distance: 8")
+
+OrbitToggleBtn.MouseButton1Click:Connect(function()
+    orbitEnabled = not orbitEnabled
+    OrbitToggleBtn.Text = "Orbit System: " .. (orbitEnabled and "ACTIVE" or "OFF")
+    OrbitToggleBtn.BackgroundColor3 = orbitEnabled and Color3.fromRGB(45, 140, 80) or Color3.fromRGB(140, 45, 45)
+end)
+
+OrbitKeybindBtn.MouseButton1Click:Connect(function()
+    listeningKey = "orbit"
+    OrbitKeybindBtn.Text = "Press Any Key..."
+end)
+
+OrbitSpeedInput.FocusLost:Connect(function()
+    local val = tonumber(OrbitSpeedInput.Text:match("%d+"))
+    if val then
+        orbitSpeed = val
+        OrbitSpeedInput.Text = "Orbit Speed: " .. tostring(val)
+    end
+end)
+
+OrbitDistanceInput.FocusLost:Connect(function()
+    local val = tonumber(OrbitDistanceInput.Text:match("%d+"))
+    if val then
+        orbitDistance = val
+        OrbitDistanceInput.Text = "Orbit Distance: " .. tostring(val)
+    end
+end)
+
+-- SECTION: FLY CONTROLS
+createSectionTitle("Fly Settings")
+
+local FlyToggleBtn = createButton("Fly System: OFF", Color3.fromRGB(140, 45, 45))
+local FlyKeybindBtn = createButton("Keybind: [F]")
+local FlySpeedInput = createInput("Fly Speed: 50")
+
+FlyToggleBtn.MouseButton1Click:Connect(function()
+    flyEnabled = not flyEnabled
+    FlyToggleBtn.Text = "Fly System: " .. (flyEnabled and "ACTIVE" or "OFF")
+    FlyToggleBtn.BackgroundColor3 = flyEnabled and Color3.fromRGB(45, 140, 80) or Color3.fromRGB(140, 45, 45)
+end)
+
+FlyKeybindBtn.MouseButton1Click:Connect(function()
+    listeningKey = "fly"
+    FlyKeybindBtn.Text = "Press Any Key..."
+end)
+
+FlySpeedInput.FocusLost:Connect(function()
+    local val = tonumber(FlySpeedInput.Text:match("%d+"))
+    if val then
+        flySpeed = val
+        FlySpeedInput.Text = "Fly Speed: " .. tostring(val)
+    end
+end)
+
+-- ================= INPUT LISTENER =================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        if listeningKey == "orbit" then
+            orbitKeybind = input.KeyCode
+            OrbitKeybindBtn.Text = "Keybind: [" .. input.KeyCode.Name .. "]"
+            listeningKey = nil
+        elseif listeningKey == "fly" then
+            flyKeybind = input.KeyCode
+            FlyKeybindBtn.Text = "Keybind: [" .. input.KeyCode.Name .. "]"
+            listeningKey = nil
+        else
+            if input.KeyCode == orbitKeybind then
+                orbitEnabled = not orbitEnabled
+                OrbitToggleBtn.Text = "Orbit System: " .. (orbitEnabled and "ACTIVE" or "OFF")
+                OrbitToggleBtn.BackgroundColor3 = orbitEnabled and Color3.fromRGB(45, 140, 80) or Color3.fromRGB(140, 45, 45)
+            elseif input.KeyCode == flyKeybind then
+                flyEnabled = not flyEnabled
+                FlyToggleBtn.Text = "Fly System: " .. (flyEnabled and "ACTIVE" or "OFF")
+                FlyToggleBtn.BackgroundColor3 = flyEnabled and Color3.fromRGB(45, 140, 80) or Color3.fromRGB(140, 45, 45)
+            end
+        end
+    end
+end)
+
+-- ================= CORE LOOPS =================
+
+-- Loop Orbit
+RunService.Heartbeat:Connect(function(dt)
+    if orbitEnabled and targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local myChar = LocalPlayer.Character
+        if myChar and myChar:FindFirstChild("HumanoidRootPart") then
+            local myHrp = myChar.HumanoidRootPart
+            local targetHrp = targetPlayer.Character.HumanoidRootPart
+            
+            orbitAngle = orbitAngle + (orbitSpeed * dt)
+            local offsetX = math.cos(orbitAngle) * orbitDistance
+            local offsetZ = math.sin(orbitAngle) * orbitDistance
+            
+            myHrp.CFrame = CFrame.new(targetHrp.Position + Vector3.new(offsetX, 0, offsetZ), targetHrp.Position)
+        end
+    end
+end)
+
+-- Loop Fly Smooth
+RunService.RenderStepped:Connect(function()
+    if flyEnabled then
+        local myChar = LocalPlayer.Character
+        if myChar and myChar:FindFirstChild("HumanoidRootPart") then
+            local hrp = myChar.HumanoidRootPart
+            local cam = workspace.CurrentCamera
+            
+            local moveDir = Vector3.zero
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+            
+            if moveDir.Magnitude > 0 then
+                hrp.Velocity = moveDir.Unit * flySpeed
+            else
+                hrp.Velocity = Vector3.zero
+            end
+        end
+    end
+end)
