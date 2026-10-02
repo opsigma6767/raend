@@ -1,0 +1,116 @@
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local StarterGui = game:GetService("StarterGui")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
+local hum = char:WaitForChild("Humanoid")
+
+-- ==========================================
+-- PENGATURAN
+-- ==========================================
+local SLIDE_SPEED = 150
+local BASE_DETEKSI = 5 -- Jarak minimal sensor saat meluncur datar
+local ANTICIPATION_TIME = 0.15 -- Waktu antisipasi (detik) sebelum nyentuh tanah
+
+local isRailgunEnabled = false
+local isSliding = false
+
+local function notify(pesan)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = "Dynamic Railgun",
+            Text = pesan,
+            Duration = 2
+        })
+    end)
+end
+
+-- ==========================================
+-- SENSOR TANAH DINAMIS (Anti Telat)
+-- ==========================================
+local function checkAlmostGrounded()
+    -- Ambil kecepatan vertikal (jatuh)
+    local fallSpeed = hrp.AssemblyLinearVelocity.Y
+    
+    -- Hitung jarak sensor:
+    -- Jika sedang jatuh (kecepatan minus), sensor akan memanjang secara otomatis
+    local dynamicDistance = BASE_DETEKSI
+    if fallSpeed < -5 then
+        -- Jarak = Kecepatan Jatuh x Waktu Antisipasi
+        dynamicDistance = BASE_DETEKSI + (math.abs(fallSpeed) * ANTICIPATION_TIME)
+    end
+    
+    local rayOrigin = hrp.Position
+    local rayDirection = Vector3.new(0, -dynamicDistance, 0)
+    
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {char}
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    
+    local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+    
+    if result and result.Instance then
+        return true 
+    end
+    return false
+end
+
+-- ==========================================
+-- EKSEKUSI LUNCURAN
+-- ==========================================
+local function startRailgunSlide()
+    if isSliding then return end
+    isSliding = true
+    
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(200000, 0, 200000) 
+    bv.Velocity = hrp.CFrame.LookVector * SLIDE_SPEED
+    bv.Parent = hrp
+    
+    local connection
+    connection = RunService.Heartbeat:Connect(function()
+        if checkAlmostGrounded() then
+            connection:Disconnect()
+            if bv then bv:Destroy() end
+            
+            -- EKSEKUSI AUTO FAINT (R)
+            task.spawn(function()
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+                task.wait(0.05) -- Beri waktu sedikit agar input terdaftar di server
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+                
+                task.wait(0.5) 
+                isSliding = false
+            end)
+        end
+    end)
+    
+    task.delay(2.5, function()
+        if connection.Connected then
+            connection:Disconnect()
+            if bv then bv:Destroy() end
+            isSliding = false
+        end
+    end)
+end
+
+-- ==========================================
+-- TOGGLE & TRIGGER
+-- ==========================================
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    
+    if input.KeyCode == Enum.KeyCode.X then
+        isRailgunEnabled = not isRailgunEnabled
+        notify(isRailgunEnabled and "Sistem AKTIF" or "Sistem MATI")
+    end
+    
+    if isRailgunEnabled and input.KeyCode == Enum.KeyCode.Two then
+        task.wait(0.05)
+        startRailgunSlide()
+    end
+end)
